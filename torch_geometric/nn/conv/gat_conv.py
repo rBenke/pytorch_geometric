@@ -244,7 +244,29 @@ class GATConv(MessagePassing):
                         "'edge_index' in a 'SparseTensor' form")
 
         # edge_updater_type: (alpha: OptPairTensor, edge_attr: OptTensor)
-        alpha = self.edge_updater(edge_index, alpha=alpha, edge_attr=edge_attr)
+        #alpha = self.edge_updater(edge_index, alpha=alpha, edge_attr=edge_attr)
+        
+        if isinstance(edge_index, Tensor):
+            col_ind = edge_index[0,:]
+            row_ind = edge_index[1,:]
+        elif isinstance(edge_index, SparseTensor):
+            col_ind = edge_index.storage.col()
+            row_ind = edge_index.storage.row()
+
+        alpha_src = alpha_src[col_ind,:]
+        alpha_dst = None if alpha_dst is None else alpha_dst[row_ind,:]
+        alpha = alpha_src if alpha_dst is None else alpha_src + alpha_dst
+        if edge_attr is not None and self.lin_edge is not None:
+            if edge_attr.dim() == 1:
+                edge_attr = edge_attr.view(-1, 1)
+            edge_attr = self.lin_edge(edge_attr)
+            edge_attr = edge_attr.view(-1, H, C)
+            alpha_edge = (edge_attr * self.att_edge).sum(dim=-1)
+            alpha = alpha + alpha_edge
+        alpha = F.leaky_relu(alpha, self.negative_slope)
+        alpha = softmax(alpha, row_ind, None, None)
+        #alpha = softmax(alpha, None, edge_index.storage.rowptr(), None) # faster but needs rowptr
+        alpha = F.dropout(alpha, p=self.dropout, training=self.training)
 
         # propagate_type: (x: OptPairTensor, alpha: Tensor)
         out = self.propagate(edge_index, x=x, alpha=alpha, size=size)
@@ -264,26 +286,6 @@ class GATConv(MessagePassing):
                 return out, edge_index.set_value(alpha, layout='coo')
         else:
             return out
-
-    def edge_update(self, alpha_j: Tensor, alpha_i: OptTensor,
-                    edge_attr: OptTensor, index: Tensor, ptr: OptTensor,
-                    size_i: Optional[int]) -> Tensor:
-        # Given edge-level attention coefficients for source and target nodes,
-        # we simply need to sum them up to "emulate" concatenation:
-        alpha = alpha_j if alpha_i is None else alpha_j + alpha_i
-
-        if edge_attr is not None and self.lin_edge is not None:
-            if edge_attr.dim() == 1:
-                edge_attr = edge_attr.view(-1, 1)
-            edge_attr = self.lin_edge(edge_attr)
-            edge_attr = edge_attr.view(-1, self.heads, self.out_channels)
-            alpha_edge = (edge_attr * self.att_edge).sum(dim=-1)
-            alpha = alpha + alpha_edge
-
-        alpha = F.leaky_relu(alpha, self.negative_slope)
-        alpha = softmax(alpha, index, ptr, size_i)
-        alpha = F.dropout(alpha, p=self.dropout, training=self.training)
-        return alpha
 
     def message(self, x_j: Tensor, alpha: Tensor) -> Tensor:
         return alpha.unsqueeze(-1) * x_j
