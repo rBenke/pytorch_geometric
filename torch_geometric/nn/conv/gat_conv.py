@@ -247,12 +247,17 @@ class GATConv(MessagePassing):
         alpha = self.edge_updater(edge_index, alpha=alpha, edge_attr=edge_attr)
 
         # propagate_type: (x: OptPairTensor, alpha: Tensor)
-        out = self.propagate(edge_index, x=x, alpha=alpha, size=size)
-
-        if self.concat:
-            out = out.view(-1, self.heads * self.out_channels)
-        else:
-            out = out.mean(dim=1)
+        if isinstance(edge_index, Tensor):
+            out = self.propagate(edge_index, x=x, alpha=alpha, size=size)
+            out = out.view(-1, self.heads * self.out_channels) if self.concat else out.mean(dim=1)
+        elif isinstance(edge_index, SparseTensor):
+            out = torch.zeros(x_dst.shape[0], H*self.out_channels) if self.concat else torch.zeros(x_dst.shape[0], self.out_channels)
+            for i in range(H):
+                edge_index.set_value_(alpha[:,i])
+                if self.concat:
+                    out[:,i*self.out_channels:(i+1)*self.out_channels] = self.propagate(edge_index, x=x[0][:,i,:], size=size)
+                else:
+                    out[:,i] += self.propagate(edge_index, x=x[0][:,i,:], size=size)
 
         if self.bias is not None:
             out = out + self.bias
@@ -288,6 +293,9 @@ class GATConv(MessagePassing):
     def message(self, x_j: Tensor, alpha: Tensor) -> Tensor:
         return alpha.unsqueeze(-1) * x_j
 
+    def message_and_aggregate(self, adj_t: SparseTensor, x: Tensor) -> Tensor:
+                return matmul(adj_t, x, reduce="sum")
+    
     def __repr__(self) -> str:
         return (f'{self.__class__.__name__}({self.in_channels}, '
                 f'{self.out_channels}, heads={self.heads})')
