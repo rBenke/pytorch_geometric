@@ -257,7 +257,7 @@ class GATConv(MessagePassing):
                 if self.concat:
                     out[:,i*self.out_channels:(i+1)*self.out_channels] = self.propagate(edge_index, x=x[0][:,i,:], size=size)
                 else:
-                    out[:,i] += self.propagate(edge_index, x=x[0][:,i,:], size=size)
+                    out += self.propagate(edge_index, x=x[0][:,i,:], size=size)
 
         if self.bias is not None:
             out = out + self.bias
