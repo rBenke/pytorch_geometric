@@ -6,7 +6,7 @@ import torch
 import torch.nn.functional as F
 from tqdm import tqdm
 
-from benchmark.utils import emit_itt, get_dataset, get_model, get_split_masks
+from utils import emit_itt, get_dataset, get_model, get_split_masks
 from torch_geometric.loader import NeighborLoader
 from torch_geometric.nn import PNAConv
 from torch_geometric.profile import rename_profile_file, timeit, torch_profile
@@ -21,6 +21,7 @@ supported_sets = {
 def train_homo(model, loader, optimizer, device, progress_bar=True, desc=""):
     if progress_bar:
         loader = tqdm(loader, desc=desc)
+    epoch_loss = 0
     for batch in loader:
         optimizer.zero_grad()
         batch = batch.to(device)
@@ -34,7 +35,9 @@ def train_homo(model, loader, optimizer, device, progress_bar=True, desc=""):
         target = batch.y[:batch_size]
         loss = F.cross_entropy(out, target)
         loss.backward()
+        epoch_loss += loss
         optimizer.step()
+    print("Epoch total loss: ", str(loss))
 
 
 def train_hetero(model, loader, optimizer, device, progress_bar=True, desc=""):
@@ -94,7 +97,7 @@ def test(model, loader, device, hetero, progress_bar=True, desc="") -> None:
 
 def run(args: argparse.ArgumentParser):
 
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cpu')
     # If we use a custom number of steps, then we need to use RandomSampler,
     # which already does shuffle.
     shuffle = False if args.num_steps != -1 else True

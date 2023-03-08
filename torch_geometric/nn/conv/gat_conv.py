@@ -17,7 +17,7 @@ from torch_geometric.typing import (
     torch_sparse,
 )
 from torch_geometric.utils import add_self_loops, remove_self_loops, softmax
-
+from torch_sparse import matmul
 from ..inits import glorot, zeros
 
 
